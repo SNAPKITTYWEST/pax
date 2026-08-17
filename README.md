@@ -134,6 +134,20 @@ PAX ISA          →  gemm.ptx mma.sync + sampler top-p nucleus
 
 **Tri-License**: BSL-1.1 / AGPL-3.0 / MPL-2.0
 
-Copyright (C) 2026 Bel Esprit D'Accord Irrevocable Trust / SnapKitty Collective Limited
+| Use case | License |
+|----------|---------|
+| Research / evaluation | BSL-1.1 (free) |
+| SaaS / network deployment | AGPL-3.0 (mandatory, source disclosure) |
+| File-level modification, non-network | MPL-2.0 |
+| Copyleft bypass | Commercial (contact below) |
+
+**Patent retaliation clause active.** Initiating patent litigation against the copyright holder, any co-author, or any downstream user terminates your license automatically.
+
+No training data use. This work may not be used as training data, fine-tuning data, or input for any ML/AI system without explicit written permission.
+
+Copyright (C) 2026 **Bel Esprit D'Accord Irrevocable Trust** (EIN 42-697643)
+SnapKitty Collective Limited
 
 Authors: **Ahmad Ali Parr** — **Jessica Westerhoff**
+
+Commercial licensing: licensing@snapkittywest.dev
