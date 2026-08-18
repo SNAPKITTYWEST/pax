@@ -66,11 +66,43 @@ theorem pax_fp16_zero_is_zero : Float16.zero.isZero = true := by
 /-- FP16 negation flips the sign bit. -/
 theorem pax_fp16_neg_sign (x : Float16) :
     ((-x) : Float16).signBit = !x.signBit := by
-  simp [Float16.signBit, Neg.neg, HNeg.hneg]
-  sorry
-  -- Proof: (-x).bits = x.bits XOR (1 <<< 15)
-  --        sign bit = bit 15 of x.bits XOR (1 <<< 15)
-  --        = (bit 15 of x.bits) XOR 1 = !x.signBit
+  -- Helper 1: (a ^^^ b : UInt16).toNat = a.toNat ^^^ b.toNat
+  -- Proof: Fin.xor uses (Nat.xor a b) % 65536; since a, b < 2^16 the modulo is a no-op.
+  have u16_xor_toNat : (x.bits ^^^ (1 <<< 15 : UInt16)).toNat =
+                       x.bits.toNat ^^^ (1 <<< 15 : UInt16).toNat := by
+    have heq : (x.bits ^^^ (1 <<< 15 : UInt16)).toNat =
+               (x.bits.toNat ^^^ (1 <<< 15 : UInt16).toNat) % 65536 := rfl
+    rw [heq]
+    apply Nat.mod_eq_of_lt
+    have ha : x.bits.toNat < 2 ^ 16 :=
+      calc x.bits.toNat < 65536 := x.bits.val.isLt
+                        _ = 2 ^ 16 := by norm_num
+    have hb : (1 <<< 15 : UInt16).toNat < 2 ^ 16 := by native_decide
+    exact calc x.bits.toNat ^^^ (1 <<< 15 : UInt16).toNat < 2 ^ 16 :=
+                  Nat.xor_lt_two_pow ha hb
+              _ = 65536 := by norm_num
+  -- Helper 2: Nat.shiftRight distributes over Nat.xor
+  -- Proof: testBit_shiftRight + testBit_xor + eq_of_testBit_eq
+  have xor_shr : ∀ (n m k : Nat), (n ^^^ m) >>> k = (n >>> k) ^^^ (m >>> k) := by
+    intro n m k
+    apply Nat.eq_of_testBit_eq
+    intro i
+    simp only [Nat.testBit_shiftRight, Nat.testBit_xor]
+  -- Main: unfold signBit and the Neg instance, rewrite, case-split on bit 15
+  simp only [Float16.signBit,
+             show (-x : Float16).bits = x.bits ^^^ (1 <<< 15 : UInt16) from rfl]
+  rw [u16_xor_toNat, xor_shr,
+      show (1 <<< 15 : UInt16).toNat >>> 15 = 1 from by native_decide]
+  -- Goal: decide ((x.bits.toNat >>> 15) ^^^ 1 = 1) = !decide (x.bits.toNat >>> 15 = 1)
+  -- x.bits.toNat < 65536 so bit 15 is 0 or 1; close each case by decide
+  have hlt : x.bits.toNat < 65536 := x.bits.val.isLt
+  have h01 : x.bits.toNat >>> 15 = 0 ∨ x.bits.toNat >>> 15 = 1 := by
+    have hshr : x.bits.toNat >>> 15 = x.bits.toNat / 2 ^ 15 :=
+      Nat.shiftRight_eq_div_pow _ _
+    have h15 : (2 : Nat) ^ 15 = 32768 := by norm_num
+    rw [hshr, h15]
+    omega
+  rcases h01 with h | h <;> simp only [h] <;> decide
 
 /-- ULP bound is positive for all finite FP16 values. -/
 theorem pax_fp16_ulp_pos (x : Float16) (hfin : x.isFinite) :

@@ -70,10 +70,11 @@ theorem mma_sync_correct (tcu : TensorCoreUnit) (A : FragA) (B : FragB) (C : Fra
       (Finset.sum Finset.univ fun (k : Fin 16) =>
         Float32.mul (Float16.toFloat32 (A.data i16 k))
                     (Float16.toFloat32 (B.data k j16))) := by
-  sorry
-  -- Proof: unfold mma_sync spec, rw gemm_spec, use PAX.mma_sync_correct lemma from WMMA.lean.
-  -- The intro/rw on tcu.hTile is bookkeeping; the mathematical content is trivial given
-  -- mma_sync_correct in PAX.WMMA.
+  intro i j i16 j16 _ _
+  -- mma_sync is defined as ⟨fun i j => Float32.add (C.data i j) (Finset.sum ...)⟩;
+  -- unfolding reduces (mma_sync A B C).data i16 j16 to the RHS by projection + beta.
+  unfold mma_sync
+  rfl
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- PTX REGISTER ROUND-TRIP
@@ -91,10 +92,14 @@ theorem wmma_ptx_A_roundtrip (A : FragA) :
 theorem wmma_ptx_C_roundtrip (C : FragC) :
     ptx_to_wmma_C (wmma_to_ptx_C C) = C := by
   sorry
-  -- Proof: wmma_to_ptx_C packs Float32.bits into UInt32;
-  --        ptx_to_wmma_C reinterprets UInt32 as Float32.bits.
-  --        These are inverse operations: ⟨bits⟩ round-trips through bits ↔ ⟨bits⟩.
-  --        Requires Fragment.ext to lift the element-wise equality to fragment equality.
+  -- NOTE: this sorry is intentional — the theorem is FALSE with the current definitions.
+  -- wmma_to_ptx_C maps only (row 0, col r) for r : Fin 8 → 8 of the 256 entries.
+  -- ptx_to_wmma_C reconstructs only row 0, cols 0–7; all other positions return Float32.zero.
+  -- So (ptx_to_wmma_C (wmma_to_ptx_C C)).data i j = Float32.zero for i.val ≠ 0 or j.val ≥ 8,
+  -- which differs from C.data i j in general.
+  -- Fix: redefine wmma_to_ptx_C as (Fin 64 → UInt32) encoding all 16×16 entries via
+  --   r ↦ C.data ⟨r/16, _⟩ ⟨r%16, _⟩  and update ptx_to_wmma_C accordingly.
+  -- The sketch in the proof comment (using r/4, r%4 over PTXReg.F32) targets a revised API.
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- PTX MMA CORRECTNESS (RE-EXPORT)

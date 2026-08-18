@@ -99,10 +99,33 @@ theorem no_buffer_alias
       s1.bufferIdx = s2.bufferIdx →
       s1.kTile = s2.kTile → s1 = s2 := by
   sorry
-  -- Proof: in a correctly scheduled pipeline, each bufferIdx is used by at most one
-  -- kTile at a time. Two stages with the same bufferIdx and kTile must be the same
-  -- stage (inserted once into the list). Requires PipelineStage to be Eq-decidable
-  -- and the insertion invariant from the loop scheduler.
+  -- PROOF STATUS: UNPROVABLE WITH CURRENT HYPOTHESES
+  --
+  -- Root cause: `PipelineStage` has 7 fields.  `PipelineStage.ext` requires
+  -- proving each field equal:
+  --   kTile, bufferIdx       ← given by hktile / hbuf
+  --   copyIssued, copyCommit, copyDone, computeIssued, computeDone, hRAW
+  --                          ← NOT constrained by any hypothesis
+  -- Two distinct stages in `stages` can share (bufferIdx, kTile) while
+  -- differing in lifecycle state, so s1 = s2 does not follow.
+  -- The hypothesis `hValid` only asserts bufferIdx < numStages; it carries
+  -- no uniqueness information about pairs (bufferIdx, kTile).
+  --
+  -- To close this sorry, ADD ONE of the following to the theorem signature:
+  --   (a) A deterministic scheduling-function hypothesis:
+  --         hSched : ∀ s ∈ stages, s = schedFn s.bufferIdx s.kTile
+  --       Proof then: s1 = schedFn s1.bufferIdx s1.kTile
+  --                      = schedFn s2.bufferIdx s2.kTile  -- by hbuf, hktile
+  --                      = s2
+  --   (b) A direct pair-injectivity hypothesis (essentially the conclusion):
+  --         hInj : ∀ s1 s2 ∈ stages,
+  --                  s1.bufferIdx = s2.bufferIdx → s1.kTile = s2.kTile → s1 = s2
+  --       Then the theorem body is simply `exact hInj s1 s2 hs1 hs2 hbuf hktile`.
+  --   (c) [Alternative] Weaken the conclusion to same list-position:
+  --         ∃ i (h : i < stages.length),
+  --           stages.get ⟨i, h⟩ = s1 ∧ stages.get ⟨i, h⟩ = s2
+  --       This is provable if a List.Nodup hypothesis is available and
+  --       PipelineStage has a DecidableEq instance.
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- THROUGHPUT BOUNDS (RE-EXPORT)

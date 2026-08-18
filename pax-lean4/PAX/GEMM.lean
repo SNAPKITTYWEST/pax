@@ -27,20 +27,18 @@ theorem gemm_spec_eq_wmma {M N K : ℕ} (A : Matrix Float16 M K) (B : Matrix Flo
 /-- WMMA equals PTX: the PTX mma.sync encoding is equivalent to the WMMA model. -/
 theorem wmma_eq_ptx {M N K : ℕ} (A : Matrix Float16 M K) (B : Matrix Float16 K N) :
     wmma_gemm_impl A B = ptx_gemm_impl A B := by
-  sorry
-  -- Proof: ptx_eq_wmma (from PAX.PTX) gives ptx_gemm_impl A B = wmma_gemm_impl A B;
-  -- reverse the equality.
+  rfl
+  -- Proof: ptx_gemm_impl is definitionally wmma_gemm_impl (see PAX.PTX def ptx_gemm_impl).
+  -- Delta-reduction: ptx_gemm_impl A B ↦ wmma_gemm_impl A B, so both sides are identical.
 
 /-- PTX equals 3-stage pipeline: the pipelined kernel produces identical results. -/
 theorem ptx_eq_pipeline {M N K : ℕ} (A : Matrix Float16 M K) (B : Matrix Float16 K N) :
     ptx_gemm_impl A B = pipeline_gemm_impl 3 A B := by
-  sorry
+  rfl
   -- Proof:
-  --   pipeline_gemm_correct (stages := 3) (by norm_num) (by norm_num) A B :
-  --       pipeline_gemm_impl 3 A B = gemm_spec A B
-  --   ptx_gemm_correct A B :
-  --       ptx_gemm_impl A B = gemm_spec A B
-  --   Transitivity gives the claim.
+  --   ptx_gemm_impl A B          ↦ wmma_gemm_impl A B  (def ptx_gemm_impl, PAX.PTX)
+  --   pipeline_gemm_impl 3 A B   ↦ wmma_gemm_impl A B  (def pipeline_gemm_impl, PAX.Pipeline)
+  --   Both sides delta-reduce to wmma_gemm_impl A B, so rfl closes the goal.
 
 /-- All four implementations produce the same result. -/
 theorem all_implementations_equivalent {M N K : ℕ}
@@ -73,14 +71,12 @@ theorem bias_gelu_fusion_correct {M N K : ℕ} (bias : Fin N → Float16)
     (A : Matrix Float16 M K) (B : Matrix Float16 K N) :
     epilogue_gemm_impl (fuseEpilogue (biasAdd bias) geluOp) A B =
     fun i j => geluOp.apply ((biasAdd bias).apply ((gemm_spec A B) i j)) := by
-  sorry
-  -- Proof:
-  --   epilogue_gemm_correct (fuseEpilogue (biasAdd bias) geluOp) :
-  --     epilogue_gemm_impl (fuseEpilogue ...) A B =
-  --       fun i j => (fuseEpilogue (biasAdd bias) geluOp).apply ((gemm_spec A B) i j)
-  --   By definition of fuseEpilogue:
-  --     (fuseEpilogue f g).apply = g.apply ∘ f.apply
-  --   So:
-  --     fun i j => geluOp.apply ((biasAdd bias).apply ((gemm_spec A B) i j)) ✓
+  rfl
+  -- Proof (all steps definitional):
+  --   1. epilogue_gemm_impl e A B  ↦  fun i j => e.apply ((gemm_spec A B) i j)
+  --   2. fuseEpilogue f g           ↦  ⟨g.apply ∘ f.apply⟩
+  --   3. (⟨g.apply ∘ f.apply⟩).apply  ↦  g.apply ∘ f.apply   (struct projection)
+  --   4. (g.apply ∘ f.apply) x         ↦  g.apply (f.apply x)  (Function.comp beta)
+  --   Chain: LHS ↦ fun i j => geluOp.apply ((biasAdd bias).apply ((gemm_spec A B) i j)) = RHS
 
 end PAX.GEMM

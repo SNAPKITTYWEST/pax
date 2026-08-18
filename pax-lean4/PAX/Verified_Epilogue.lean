@@ -60,13 +60,10 @@ theorem fuse_id_left (f : EpilogueOp Float32) :
 theorem fuse_chain_register_bound :
     ∀ (ops : List (EpilogueOp Float32)), ops.length ≥ 1 →
     regs (ops.foldl fuseEpilogue ⟨id⟩) ≤ 8 * ops.length := by
-  intro ops hlen
-  sorry
-  -- Proof by induction on ops.length:
-  --   Base: length 1, foldl with single op e gives fuseEpilogue ⟨id⟩ e.
-  --         regs (fuseEpilogue ⟨id⟩ e) ≤ regs ⟨id⟩ + regs e + 8 = 0 + 0 + 8 = 8.
-  --   Step: assume bound holds for n ops; add one more op e.
-  --         regs (fuseEpilogue acc e) ≤ regs acc + regs e + 8 ≤ 8*n + 0 + 8 = 8*(n+1).
+  intro ops _
+  simp [regs]
+  -- regs is definitionally 0 for every EpilogueOp, so the goal reduces to
+  -- 0 ≤ 8 * ops.length, closed by Nat.zero_le (a @[simp] lemma in Lean 4 core).
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- NUMERICAL BOUNDS (CONCRETE)

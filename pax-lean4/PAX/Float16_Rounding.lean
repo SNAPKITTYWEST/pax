@@ -113,22 +113,30 @@ noncomputable def roundToFP16 (x : ℚ) : Float16 :=
   else if x > 65504  then Float16.posInf
   else if x = 0      then Float16.zero
   else
-    sorry
-    -- Full reconstruction (pseudocode, formalized in Lean below via sorry):
-    --   let s : UInt16 := if x < 0 then 1 else 0
-    --   let ax : ℚ := |x|
-    --   if ax < (2 : ℚ)^(-(14 : ℤ)) then
-    --     -- subnormal: exp = 0, mant = rne_round(⌊ax × 2^24⌋, frac)
-    --     let scaled := ax * (2 : ℚ)^(24 : ℤ)
-    --     let m := rne_round scaled.floor (scaled - scaled.floor)
-    --     ⟨(s <<< 15) ||| (m.toNat : UInt16)⟩
-    --   else
-    --     -- normal: find k ∈ [-14, 15], mant = rne_round(⌊(ax/2^k - 1) × 2^10⌋, frac)
-    --     let k := max (-14 : ℤ) (min 15 (Int.log 2 ax.ceil.natAbs))
-    --     let mscaled := (ax / (2 : ℚ)^k - 1) * (2 : ℚ)^(10 : ℤ)
-    --     let m := rne_round mscaled.floor (mscaled - mscaled.floor)
-    --     let e : UInt16 := ((k + 15).toNat : UInt16)
-    --     ⟨(s <<< 15) ||| (e <<< 10) ||| (m.toNat : UInt16)⟩
+    -- RNE algorithm: determine sign, work with |x|, then apply subnormal or normal path.
+    let s : UInt16 := if x < 0 then (1 : UInt16) else (0 : UInt16)
+    let ax : ℚ := |x|
+    if ax < (2 : ℚ) ^ (-(14 : ℤ)) then
+      -- Subnormal path: biased exponent = 0, mantissa = RNE(ax × 2^24)
+      let scaled : ℚ := ax * (2 : ℚ) ^ (24 : ℤ)
+      let ip : ℤ := ⌊scaled⌋
+      let m : ℤ := rne_round ip (scaled - (ip : ℚ))
+      ⟨(s <<< 15) ||| (m.toNat : UInt16)⟩
+    else
+      -- Normal path: compute k = ⌊log₂ ax⌋ via Nat.log on num/den with 1-step correction.
+      -- For ax = p/q (reduced), Nat.log 2 p - Nat.log 2 q equals ⌊log₂ ax⌋ or is 1 too high;
+      -- the conditional corrects the off-by-one when 2^k₀ > ax.
+      let p : ℕ := ax.num.natAbs
+      let q : ℕ := ax.den
+      let k₀ : ℤ := (Nat.log 2 p : ℤ) - (Nat.log 2 q : ℤ)
+      let k₀c : ℤ := if (2 : ℚ) ^ k₀ ≤ ax then k₀ else k₀ - 1
+      let k : ℤ := max (-14 : ℤ) (min 15 k₀c)
+      -- Scale to [1, 2) and extract the 10 fractional mantissa bits via RNE.
+      let mscaled : ℚ := (ax / (2 : ℚ) ^ k - 1) * (2 : ℚ) ^ (10 : ℤ)
+      let ip : ℤ := ⌊mscaled⌋
+      let m : ℤ := rne_round ip (mscaled - (ip : ℚ))
+      let e : UInt16 := ((k + 15).toNat : UInt16)
+      ⟨(s <<< 15) ||| (e <<< 10) ||| (m.toNat : UInt16)⟩
 
 /-- roundToFP16 produces negInf for x < -65504. -/
 @[simp]
@@ -217,7 +225,7 @@ theorem round_error_bound :
     subst hz
     simp [roundToFP16_zero, Float16.toRat, Float16.isZero, Float16.zero,
           Float16.expBits, Float16.mantBits, spacing, Float16.isSubnormal]
-    sorry  -- Show toRat Float16.zero = some 0, then |0 - 0| = 0 ≤ spacing/2
+    norm_num [Float16.toRat, Float16.isZero, spacing, Float16.isSubnormal]
   · by_cases hneg : x < 0
     · -- (b) x < 0: reduce to positive case by RNE sign symmetry
       sorry

@@ -128,11 +128,12 @@ theorem pax_gemm_residual_gelu_verified {M N K : ℕ}
     (A : Matrix Float16 M K) (B : Matrix Float16 K N) :
     epilogue_gemm_impl (fuseEpilogue (residualAdd residual) geluOp) A B =
     fun i j => geluOp.apply ((residualAdd residual).apply ((gemm_spec A B) i j)) := by
-  sorry
-  -- Same proof structure as pax_gemm_bias_gelu_verified:
-  --   epilogue_gemm_correct gives the base form
-  --   fuseEpilogue definition reduces to composition
-  --   fuse_residual_gelu_law closes the goal
+  -- epilogue_gemm_correct rewrites the LHS to its definition
+  rw [epilogue_gemm_correct]
+  -- fuse_residual_gelu_law rewrites fuseEpilogue to the explicit composition structure
+  rw [fuse_residual_gelu_law]
+  -- the remaining goal is definitionally true: ⟨f ∘ g⟩.apply x = f (g x)
+  rfl
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- FP16 ARITHMETIC EXPORT VERIFICATION

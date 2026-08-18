@@ -101,14 +101,32 @@ theorem workgroup_partition (g : WorkGroupGrid) :
     ∃ (bm : Fin g.gridM) (bn : Fin g.gridN),
       (bm.val * g.BM ≤ i.val ∧ i.val < (bm.val + 1) * g.BM) ∧
       (bn.val * g.BN ≤ j.val ∧ j.val < (bn.val + 1) * g.BN) := by
-  sorry
-  -- Proof sketch:
-  --   Let bm = i.val / g.BM, bn = j.val / g.BN.
-  --   Since BM | M and BN | N, bm < gridM and bn < gridN.
-  --   The coverage bounds follow from integer division:
-  --     bm × BM ≤ i < (bm+1) × BM  (standard floor division property).
-  --   Uniqueness: if bm' × BM ≤ i < (bm'+1) × BM and bm ≠ bm', contradiction
-  --   since the intervals [bm×BM, (bm+1)×BM) are disjoint.
+  intro i j
+  obtain ⟨qm, hqm⟩ := g.hBM
+  obtain ⟨qn, hqn⟩ := g.hBN
+  -- Euclidean division facts; omega uses these to eliminate div/mod
+  have hbm_dm : g.BM * (i.val / g.BM) + i.val % g.BM = i.val := Nat.div_add_mod i.val g.BM
+  have hbn_dm : g.BN * (j.val / g.BN) + j.val % g.BN = j.val := Nat.div_add_mod j.val g.BN
+  have hbm_r  : i.val % g.BM < g.BM := Nat.mod_lt i.val g.hBMpos
+  have hbn_r  : j.val % g.BN < g.BN := Nat.mod_lt j.val g.hBNpos
+  -- Simplify gridM and gridN using divisibility witnesses
+  have hgM : g.gridM = qm := by
+    show g.space.M / g.BM = qm
+    rw [hqm]; exact Nat.mul_div_cancel_left qm g.hBMpos
+  have hgN : g.gridN = qn := by
+    show g.space.N / g.BN = qn
+    rw [hqn]; exact Nat.mul_div_cancel_left qn g.hBNpos
+  -- Block indices are in range: bm = i/BM < M/BM = gridM (and analogously for bn)
+  have hbm_lt : i.val / g.BM < g.gridM := by
+    rw [hgM]
+    have hi : i.val < g.BM * qm := by have := i.isLt; rw [hqm] at this; exact this
+    omega
+  have hbn_lt : j.val / g.BN < g.gridN := by
+    rw [hgN]
+    have hj : j.val < g.BN * qn := by have := j.isLt; rw [hqn] at this; exact this
+    omega
+  -- Provide witnesses and discharge coverage bounds (all pure omega from div/mod facts)
+  refine ⟨⟨i.val / g.BM, hbm_lt⟩, ⟨j.val / g.BN, hbn_lt⟩, ⟨⟨?_, ?_⟩, ⟨?_, ?_⟩⟩⟩ <;> omega
 
 /-- Disjointness: no two distinct workgroups share an output element. -/
 theorem workgroup_disjoint (g : WorkGroupGrid)
