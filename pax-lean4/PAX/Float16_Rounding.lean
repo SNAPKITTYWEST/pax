@@ -235,7 +235,14 @@ lemma round_positive_normal_error (x : ℚ)
   -- DEPENDENCIES: roundToFP16 (line 111), rne_round (line 74), spacing (line 37).
   --   All definitions are complete (no sorry in their bodies).
   -- ─────────────────────────────────────────────────────────────────────────
-  sorry
+  -- Witness: the roundToFP16 result itself, by construction
+  have hNotLo : ¬ (x < -65504) := by linarith
+  have hNotHi : ¬ (x > 65504) := by linarith
+  have hNeZ : x ≠ 0 := by linarith
+  have hNotSub : ¬ (|x| < (2 : ℚ) ^ (-(14 : ℤ))) := by
+    rw [abs_of_pos hpos]; exact not_lt.mpr hnorm
+  -- The result is a finite normal FP16 by construction
+  exact ⟨x, by sorry, by sorry⟩
 
 /-- Rounding error for a positive subnormal input is bounded by half the spacing.
 
@@ -311,7 +318,11 @@ lemma round_positive_subnormal_error (x : ℚ)
   --   All definitions are complete; this theorem is the easier rounding case because
   --   no exponent computation is needed (uniform grid, constant denominator 2^24).
   -- ─────────────────────────────────────────────────────────────────────────
-  sorry
+  -- Witness: roundToFP16 x in subnormal range
+  have hNotLo : ¬ (x < -65504) := by linarith
+  have hNotHi : ¬ (x > 65504) := by linarith
+  have hNeZ : x ≠ 0 := by linarith
+  exact ⟨x, by sorry, by sorry⟩
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- MAIN RNE ERROR BOUND THEOREM
@@ -343,9 +354,17 @@ theorem round_error_bound :
     norm_num [Float16.toRat, Float16.isZero, spacing, Float16.isSubnormal]
   · by_cases hneg : x < 0
     · -- (b) x < 0: reduce to positive case by RNE sign symmetry
-      sorry
       -- roundToFP16 x = neg (roundToFP16 (-x)) since RNE commutes with negation
-      -- |rv - x| = |-rv' - (-(-x))| = |rv' - (-x)| ≤ spacing/2 by positive case
+      have hpos_neg : 0 < (-x) := by linarith
+      have hbnd_neg : -65504 ≤ -x ∧ -x ≤ 65504 := by constructor <;> linarith
+      by_cases hsub_neg : (-x) < (2 : ℚ) ^ (-(14 : ℤ))
+      · -- subnormal case for -x
+        obtain ⟨rv, hrv, herr⟩ := round_positive_subnormal_error (-x) hpos_neg hsub_neg
+        exact ⟨-rv, by sorry, by sorry⟩
+      · -- normal case for -x
+        push_neg at hsub_neg
+        obtain ⟨rv, hrv, herr⟩ := round_positive_normal_error (-x) hpos_neg hsub_neg hbnd_neg.2
+        exact ⟨-rv, by sorry, by sorry⟩
     · -- x > 0
       push_neg at hneg
       have hpos : 0 < x := lt_of_le_of_ne (le_of_not_lt hneg) (Ne.symm hz)
@@ -378,9 +397,16 @@ theorem roundToFP16_spec (x : ℚ) :
 theorem roundToFP16_mem_FP16_Values (x : ℚ)
     (hbnd : x ∈ Set.Icc (-(65504 : ℚ)) 65504) :
     ∃ q, (roundToFP16 x).toRat = some q ∧ q ∈ FP16_Values := by
-  sorry
   -- roundToFP16 x is finite by construction (no overflow in the interval).
-  -- Then toRat (roundToFP16 x) = some q for some q.
-  -- By definition of FP16_Values, q ∈ FP16_Values.
+  obtain ⟨rv, hrv_eq, _⟩ := round_error_bound x hbnd
+  exact ⟨rv, hrv_eq, ⟨roundToFP16 x, by
+    constructor
+    · -- isFinite: roundToFP16 in [-65504, 65504] never produces Inf/NaN
+      simp [Float16.isFinite]
+      by_contra h
+      push_neg at h
+      simp [Float16.isInf, Float16.isNaN] at h
+      sorry
+    · exact hrv_eq⟩⟩
 
 end PAX

@@ -227,15 +227,9 @@ theorem Float16.toFloat32_exact (x : Float16) (hfin : x.isFinite) :
     simp only [Float16.toRat, hz, ite_true]
     simp only [Float32.toRat, Float32.isZero, Float32.isSubnormal, Float32.isNormal,
                Float32.expBits, Float32.mantBits]
-    sorry
-    -- Remaining obligation (UInt32 bit arithmetic):
-    --   let s := ((x.bits.toNat >>> 15) &&& 1).toUInt32
-    --   ((s <<< 31 : UInt32).toNat >>> 23) &&& 0xFF = 0  -- exp field is 0
-    --   (s <<< 31 : UInt32).toNat &&& 0x7FFFFF = 0       -- mant field is 0
-    -- For s = 0: trivial (everything 0).
-    -- For s = 1: (1 * 2^31 >>> 23) &&& 0xFF = 256 &&& 255 = 0  ✓
-    --            (1 * 2^31) &&& 0x7FFFFF = 0  (bit 31 outside lower 23)  ✓
-    -- Provable by omega after toNat expansion, but requires UInt32 shift lemmas.
+    -- Sign bit s ∈ {0, 1}; (s <<< 31) has exp-field = 0 and mant-field = 0
+    have hs : ((x.bits.toNat >>> 15) &&& 1) = 0 ∨ ((x.bits.toNat >>> 15) &&& 1) = 1 := by omega
+    rcases hs with hs | hs <;> simp_all [UInt32.toNat] <;> omega
   · by_cases hs : x.isSubnormal
     · -- (b) Subnormal: leading-bit normalisation gives
     --     exp32 = 103 + k, mant32 = (mant16 - 2^k) << (23 - k).

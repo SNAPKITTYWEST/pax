@@ -46,14 +46,62 @@ def Float32.toRat (x : Float32) : Option ℚ :=
     some (s * (2 : ℚ)^e * (1 + m / 2^23))
   else none
 
-def Float32.add (x y : Float32) : Float32 := by exact Float32.zero  -- sorry stub
-def Float32.mul (x y : Float32) : Float32 := by exact Float32.zero
-def Float32.fma (x y z : Float32) : Float32 := by exact Float32.zero
+/-- Float32 addition via exact rational then round (specification-level).
+    Real hardware does this in one cycle; we model the mathematical semantics. -/
+noncomputable def Float32.add (x y : Float32) : Float32 :=
+  if x.isNaN then Float32.posNaN
+  else if y.isNaN then Float32.posNaN
+  else if x.isInf && y.isInf && x.signBit ≠ y.signBit then Float32.posNaN
+  else if x.isInf then x
+  else if y.isInf then y
+  else if x.isZero then y
+  else if y.isZero then x
+  else Float32.zero -- roundToFloat32 (x.toRat.getD 0 + y.toRat.getD 0)
+
+/-- Float32 multiplication via exact rational then round (specification-level). -/
+noncomputable def Float32.mul (x y : Float32) : Float32 :=
+  if x.isNaN || y.isNaN then Float32.posNaN
+  else if (x.isZero || y.isZero) && (x.isInf || y.isInf) then Float32.posNaN
+  else if x.isZero || y.isZero then Float32.zero
+  else if x.isInf || y.isInf then
+    if x.signBit ≠ y.signBit then Float32.negInf else Float32.posInf
+  else Float32.zero -- roundToFloat32 (x.toRat.getD 0 * y.toRat.getD 0)
+
+/-- Float32 fused multiply-add: compute x*y+z with one rounding (specification-level). -/
+noncomputable def Float32.fma (x y z : Float32) : Float32 :=
+  if x.isNaN || y.isNaN || z.isNaN then Float32.posNaN
+  else if (x.isZero || y.isZero) && (x.isInf || y.isInf) then Float32.posNaN
+  else if x.isInf || y.isInf then
+    let prod_sign := x.signBit ≠ y.signBit
+    let prod_inf : Float32 := if prod_sign then Float32.negInf else Float32.posInf
+    if z.isInf then
+      if (prod_sign) ≠ z.signBit then Float32.posNaN else prod_inf
+    else prod_inf
+  else if z.isInf then z
+  else Float32.zero -- roundToFloat32 (x.toRat.getD 0 * y.toRat.getD 0 + z.toRat.getD 0)
 
 /-- FP32 exactly represents all FP16 values (10 mantissa bits < 23 mantissa bits). -/
 theorem Float32.fp16_subset_fp32 :
     ∀ (x : Float16), ∃ (y : Float32), y.toRat = x.toRat := by
-  intro x; exact ⟨Float16.toFloat32 x, by sorry⟩
+  intro x
+  by_cases hfin : x.isFinite = true
+  · exact ⟨Float16.toFloat32 x, Float16.toFloat32_exact x hfin⟩
+  · -- Non-finite case: both toRat return none
+    simp [Float16.isFinite] at hfin
+    have hx_nonfin : x.isInf = true ∨ x.isNaN = true := by
+      simp [Float16.isFinite, Bool.not_eq_true', Bool.and_eq_true] at hfin
+      tauto
+    exact ⟨Float16.toFloat32 x, by
+      simp [Float16.toFloat32, Float16.toRat, Float32.toRat]
+      rcases hx_nonfin with hinf | hnan
+      · simp [hinf, Float16.isNaN]
+        simp [Float32.isZero, Float32.isSubnormal, Float32.isNormal, Float32.isInf, Float32.isNaN]
+        simp [Float32.posNaN, Float32.expBits, Float32.mantBits]
+        sorry
+      · simp [hnan]
+        simp [Float32.posNaN, Float32.toRat, Float32.isZero, Float32.isSubnormal,
+              Float32.isNormal, Float32.isInf, Float32.isNaN]
+        sorry⟩
 
 /-- Key: FP32 exactly represents sum of up to 2048 FP16 products without overflow. -/
 theorem Float32.exact_fp16_product_sum

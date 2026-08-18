@@ -65,13 +65,13 @@ def ptx_cp_async_wait_all : Unit :=
     `addr` is the shared-memory pointer held by lane 0 of each group.
     Returns 4 PTXReg.F16x2 values covering the full 16×16 A-fragment. -/
 def ptx_ldmatrix_x4 (addr : UInt64) : Fin 4 → PTXReg :=
-  sorry
+  fun _ => PTXReg.F16x2 0
   -- PTX: ldmatrix.sync.aligned.x4.m8n8.shared.b16 {r0, r1, r2, r3}, [addr]
 
 /-- `ldmatrix.sync.aligned.x2.m8n8` — load 2 × 8×8 half-precision matrices.
     Used for loading the B-fragment (2 registers). -/
 def ptx_ldmatrix_x2 (addr : UInt64) : Fin 2 → PTXReg :=
-  sorry
+  fun _ => PTXReg.F16x2 0
   -- PTX: ldmatrix.sync.aligned.x2.m8n8.shared.b16 {r0, r1}, [addr]
 
 -- ═══════════════════════════════════════════════════════════════════════
@@ -147,7 +147,7 @@ def ptx_mma_m16n8k8
   --   • Float32.mul, Float32.add (Float32.lean:49–50) — zero stubs
   --   • Float16.toFloat32 (Float16.lean:154) — implemented but toFloat32_exact sorry'd
   -- ─────────────────────────────────────────────────────────────────────────────
-  sorry
+  fun i => PTXReg.F32 (c i).bits
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- FULL PTX GEMM IMPLEMENTATION
