@@ -90,10 +90,13 @@ theorem biasAdd_fp16_to_fp32_exact {n : ℕ} (bias : Fin n → Float16)
     This non-commutativity theorem establishes that fusion order matters. -/
 theorem scale_bias_not_commutative : ¬ ∀ (α : Float32) {n : ℕ} (bias : Fin n → Float16),
     fuseEpilogue (scaleOp α) (biasAdd bias) = fuseEpilogue (biasAdd bias) (scaleOp α) := by
-  sorry
-  -- Witness: α ≠ 1, bias[j] ≠ 0. Then:
-  --   (biasAdd ; scaleOp α).apply x = α × (x + b)
-  --   (scaleOp α ; biasAdd).apply x = α×x + b
-  -- These differ when α ≠ 1 and b ≠ 0.
+  intro h
+  -- Instantiate with specific values: α = 2, n = 1, bias[0] = 1
+  have h1 := h ⟨0x4000_0000⟩ (fun _ => ⟨0x3F80_0000⟩)
+  -- Left side: biasAdd(1) then scale(2) = 2*(x+1)
+  -- Right side: scale(2) then biasAdd(1) = 2*x+1
+  -- For x=3: left gives 2*4=8, right gives 6+1=7, so they're unequal
+  simp [fuseEpilogue, scaleOp, biasAdd] at h1
+  norm_num at h1
 
 end PAX.Verified

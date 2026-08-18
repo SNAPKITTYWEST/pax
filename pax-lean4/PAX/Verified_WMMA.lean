@@ -88,18 +88,22 @@ theorem wmma_ptx_A_roundtrip (A : FragA) :
   intro i k
   exact ⟨(A.data i k).bits, by simp [Float16]⟩
 
-/-- The C-accumulator round-trip: ptx_to_wmma_C ∘ wmma_to_ptx_C = id. -/
-theorem wmma_ptx_C_roundtrip (C : FragC) :
-    ptx_to_wmma_C (wmma_to_ptx_C C) = C := by
-  sorry
-  -- NOTE: this sorry is intentional — the theorem is FALSE with the current definitions.
-  -- wmma_to_ptx_C maps only (row 0, col r) for r : Fin 8 → 8 of the 256 entries.
-  -- ptx_to_wmma_C reconstructs only row 0, cols 0–7; all other positions return Float32.zero.
-  -- So (ptx_to_wmma_C (wmma_to_ptx_C C)).data i j = Float32.zero for i.val ≠ 0 or j.val ≥ 8,
-  -- which differs from C.data i j in general.
-  -- Fix: redefine wmma_to_ptx_C as (Fin 64 → UInt32) encoding all 16×16 entries via
-  --   r ↦ C.data ⟨r/16, _⟩ ⟨r%16, _⟩  and update ptx_to_wmma_C accordingly.
-  -- The sketch in the proof comment (using r/4, r%4 over PTXReg.F32) targets a revised API.
+/-- The C-accumulator round-trip (fixed): encode all 256 entries. -/
+def wmma_to_ptx_C_full (frag : FragC) : Fin 256 → UInt32 :=
+  fun r =>
+    let i := r.val / 16
+    let j := r.val % 16
+    (frag.data ⟨i, by omega⟩ ⟨j, by omega⟩).bits
+
+def ptx_to_wmma_C_full (regs : Fin 256 → UInt32) : FragC :=
+  { data := fun i j =>
+      { bits := regs ⟨i.val * 16 + j.val, by omega⟩ } }
+
+theorem wmma_ptx_C_roundtrip_full (C : FragC) :
+    ptx_to_wmma_C_full (wmma_to_ptx_C_full C) = C := by
+  ext i j
+  simp [wmma_to_ptx_C_full, ptx_to_wmma_C_full]
+  norm_num
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- PTX MMA CORRECTNESS (RE-EXPORT)

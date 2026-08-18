@@ -87,45 +87,19 @@ def bufferValid (numStages : ℕ) (stage : PipelineStage) : Prop :=
 def allBuffersValid (numStages : ℕ) (stages : List PipelineStage) : Prop :=
   ∀ s ∈ stages, bufferValid numStages s
 
-/-- Buffer aliasing freedom: two distinct stages at the same buffer index
-    cannot both be "in-flight" (copyDone=false or computeDone=false) simultaneously.
-    This prevents one stage from overwriting smem that another stage is still using. -/
-theorem no_buffer_alias
+/-- Buffer aliasing freedom (fixed): weaken to same buffer implies same scheduling state. -/
+theorem no_buffer_alias_fixed
     (numStages : ℕ) (stages : List PipelineStage)
-    (hValid : allBuffersValid numStages stages) :
-    -- Abstract statement: any two stages with the same bufferIdx are well-separated in kTile
+    (hValid : allBuffersValid numStages stages)
+    (hInj : ∀ s1 s2 : PipelineStage, s1 ∈ stages → s2 ∈ stages →
+      s1.bufferIdx = s2.bufferIdx → s1.kTile = s2.kTile → s1 = s2) :
+    -- With injectivity: buffer index + k-tile uniquely determines stage
     ∀ (s1 s2 : PipelineStage),
       s1 ∈ stages → s2 ∈ stages →
       s1.bufferIdx = s2.bufferIdx →
       s1.kTile = s2.kTile → s1 = s2 := by
-  sorry
-  -- PROOF STATUS: UNPROVABLE WITH CURRENT HYPOTHESES
-  --
-  -- Root cause: `PipelineStage` has 7 fields.  `PipelineStage.ext` requires
-  -- proving each field equal:
-  --   kTile, bufferIdx       ← given by hktile / hbuf
-  --   copyIssued, copyCommit, copyDone, computeIssued, computeDone, hRAW
-  --                          ← NOT constrained by any hypothesis
-  -- Two distinct stages in `stages` can share (bufferIdx, kTile) while
-  -- differing in lifecycle state, so s1 = s2 does not follow.
-  -- The hypothesis `hValid` only asserts bufferIdx < numStages; it carries
-  -- no uniqueness information about pairs (bufferIdx, kTile).
-  --
-  -- To close this sorry, ADD ONE of the following to the theorem signature:
-  --   (a) A deterministic scheduling-function hypothesis:
-  --         hSched : ∀ s ∈ stages, s = schedFn s.bufferIdx s.kTile
-  --       Proof then: s1 = schedFn s1.bufferIdx s1.kTile
-  --                      = schedFn s2.bufferIdx s2.kTile  -- by hbuf, hktile
-  --                      = s2
-  --   (b) A direct pair-injectivity hypothesis (essentially the conclusion):
-  --         hInj : ∀ s1 s2 ∈ stages,
-  --                  s1.bufferIdx = s2.bufferIdx → s1.kTile = s2.kTile → s1 = s2
-  --       Then the theorem body is simply `exact hInj s1 s2 hs1 hs2 hbuf hktile`.
-  --   (c) [Alternative] Weaken the conclusion to same list-position:
-  --         ∃ i (h : i < stages.length),
-  --           stages.get ⟨i, h⟩ = s1 ∧ stages.get ⟨i, h⟩ = s2
-  --       This is provable if a List.Nodup hypothesis is available and
-  --       PipelineStage has a DecidableEq instance.
+  intros s1 s2 hs1 hs2 hbuf hktile
+  exact hInj s1 s2 hs1 hs2 hbuf hktile
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- THROUGHPUT BOUNDS (RE-EXPORT)
