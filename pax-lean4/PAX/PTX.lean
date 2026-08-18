@@ -97,16 +97,57 @@ def ptx_mma_m16n8k8
     (b : Fin 2 → PTXReg)   -- B-fragment: 2 f16x2 registers
     (c : Fin 8 → PTXReg)   -- C-accumulator: 8 f32 registers
     : Fin 8 → PTXReg :=    -- D-accumulator: 8 f32 registers
-  sorry
+  -- ── DEFINITION SKETCH (ptx_mma_m16n8k8) ──────────────────────────────────
   -- PTX: mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32
-  --        {d0,d1,...,d7}, {a0,a1,a2,a3}, {b0,b1}, {c0,...,c7}
+  --        {d0..d7}, {a0..a3}, {b0,b1}, {c0..c7}
   --
-  -- Per-lane semantics (lane l ∈ [0,31]):
-  --   For each output element (r,c) mapped to lane l via PTX warp layout:
-  --     d_reg[slot] = c_reg[slot] + Σ_{k=0}^{7}
-  --                     half_to_float(a_reg[k/2].lo/hi[lane_k])
-  --                   × half_to_float(b_reg[k/4].lo/hi[lane_k])
-  -- where the lo/hi extraction and lane indexing follow the ISA table.
+  -- PTX ISA §9.7.13.4 — m16n8k8 WARP-LANE / REGISTER MAPPING TABLE:
+  --   The 32 warp lanes own 8 output elements each.  For lane l ∈ [0,31]:
+  --     slot s ∈ {0,1} within group of 4 (g = l / 4):
+  --       row = 2*g + (l % 4 >= 2 ? 1 : 0)      → rows 0..15
+  --       col = (l % 2) + 2*(s % 2)              → cols 0..7
+  --   Full table (slot 0..7 per lane, two output rows per register pair):
+  --     d[0]: (row 2*(l/4),     col l%4)
+  --     d[1]: (row 2*(l/4)+1,   col l%4)
+  --     d[2]: (row 2*(l/4)+8,   col l%4)
+  --     d[3]: (row 2*(l/4)+9,   col l%4)
+  --     d[4..7]: same rows, cols l%4 + 4
+  --   (Exact mapping: see CUDA PTX ISA §9.7.13.4 Table 107.)
+  --
+  -- CONCRETE BODY (to replace sorry once Float32 ops are implemented):
+  --   fun (slot : Fin 8) =>
+  --     -- Unpack A: a_reg[k/2] holds two f16; pick lo (k%2=0) or hi (k%2=1)
+  --     let unpack_a : Fin 8 → Float16 := fun ⟨k, _⟩ =>
+  --       let reg := a[⟨k / 2, by omega⟩].bits
+  --       if k % 2 = 0
+  --       then ⟨(reg &&& 0xFFFF).toUInt16⟩          -- low 16 bits
+  --       else ⟨((reg >>> 16) &&& 0xFFFF).toUInt16⟩  -- high 16 bits
+  --     -- Unpack B: b_reg[k/4] holds two f16; lo when k%2=0, hi when k%2=1
+  --     let unpack_b : Fin 8 → Float16 := fun ⟨k, _⟩ =>
+  --       let reg := b[⟨k / 4, by omega⟩].bits
+  --       if k % 2 = 0
+  --       then ⟨(reg &&& 0xFFFF).toUInt16⟩
+  --       else ⟨((reg >>> 16) &&& 0xFFFF).toUInt16⟩
+  --     -- Accumulate K=8 products into the c_f32 register for this slot
+  --     let d_val : Float32 :=
+  --       (List.range 8).foldl (fun acc k =>
+  --         Float32.add acc
+  --           (Float32.mul (Float16.toFloat32 (unpack_a ⟨k, by omega⟩))
+  --                        (Float16.toFloat32 (unpack_b ⟨k, by omega⟩)))
+  --       ) ⟨c[slot].bits⟩    -- initial value = c register reinterpreted as Float32
+  --     PTXReg.F32 d_val.bits
+  --
+  -- PREREQUISITES BEFORE INSTANTIATING:
+  --   1. Formalise the PTX ISA §9.7.13.4 lane→(row, col)→slot table as a Lean Fin function.
+  --      No existing Mathlib/Lean source covers this; must be built from scratch.
+  --   2. ptx_ldmatrix_x4 / ptx_ldmatrix_x2 (lines 67–75) must be implemented.
+  --   3. Float32.mul and Float32.add must be genuinely implemented (not zero stubs).
+  --
+  -- DEPENDENCIES:
+  --   • Float32.mul, Float32.add (Float32.lean:49–50) — zero stubs
+  --   • Float16.toFloat32 (Float16.lean:154) — implemented but toFloat32_exact sorry'd
+  -- ─────────────────────────────────────────────────────────────────────────────
+  sorry
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- FULL PTX GEMM IMPLEMENTATION
@@ -163,12 +204,69 @@ theorem ptx_mma_eq_wmma :
         (wmma_to_ptx_B B)
         (wmma_to_ptx_C C)) := by
   intro A B C
+  -- ── PROOF SKETCH (ptx_mma_eq_wmma) ──────────────────────────────────────
+  -- Goal: mma_sync A B C =
+  --   ptx_to_wmma_C (ptx_mma_m16n8k8 (wmma_to_ptx_A A) (wmma_to_ptx_B B) (wmma_to_ptx_C C))
+  --
+  -- FOUR REQUIRED SUB-LEMMAS:
+  --
+  -- SUB-LEMMA 1 — Fragment.ext: two Fragments with equal .data are equal.
+  --   fragment_ext : ∀ (f g : Fragment layout m n k α), f.data = g.data → f = g
+  --   Proof: cases f g; exact congrArg Fragment.mk  (or use Subtype.ext / structure eta).
+  --   STATUS: provable by simp [Fragment] once unfolded; no sorry needed.
+  --
+  -- SUB-LEMMA 2 — wmma_to_ptx_A packs every fragment element faithfully.
+  --   For each (ii : Fin 16) (kk : Fin 16):
+  --     let r := kk.val / 2;  let half := kk.val % 2
+  --     let reg := wmma_to_ptx_A A ⟨r, by omega⟩   -- UInt32 holding two f16
+  --     (⟨(if half = 0 then reg &&& 0xFFFF else (reg >>> 16) &&& 0xFFFF).toUInt16⟩ : Float16)
+  --       = A.data ii kk
+  --   STRUCTURAL BUG IN CURRENT STUB: wmma_to_ptx_A (WMMA.lean:178–181) hardcodes
+  --   the row `⟨0, by norm_num⟩` for every register, discarding rows 1–15.
+  --   Fix required: wmma_to_ptx_A must use the ISA §9.7.13 lane→(row,col) mapping
+  --   to pack all 16 rows across the 4 registers using the warp-level distribution.
+  --   STATUS: cannot be proved for the current row-0-only stub.
+  --
+  -- SUB-LEMMA 3 — ptx_to_wmma_C ∘ wmma_to_ptx_C = id (on the representable portion).
+  --   wmma_to_ptx_C (WMMA.lean:204): maps (row=0, col j) for j < 8 → register j.
+  --   ptx_to_wmma_C (WMMA.lean:214): maps register j back to (row=0, col j) for j < 8;
+  --     all other positions → Float32.zero.
+  --   Round-trip holds for row=0, j < 8; all other entries are defaulted to zero.
+  --   STRUCTURAL LIMITATION: the current stub encodes only 8 elements of one row,
+  --   not the full 16×16 fragment.  The theorem as stated therefore cannot hold for
+  --   a general 16×16 accumulator — the round-trip loses rows 1–15 and cols 8–15.
+  --   Fix: implement the full ISA table (all 256 elements across 8 registers × 32 lanes).
+  --   STATUS: blocked by stub encoding only row 0.
+  --
+  -- SUB-LEMMA 4 — ptx_mma_m16n8k8 per-slot equals mma_sync per element.
+  --   For each slot : Fin 8, the PTX instruction computes (see ptx_mma_m16n8k8 sketch):
+  --     d[slot].bits = (C_f32[slot] + Σ_{k<8} unpack(a,k) × unpack(b,k)).bits
+  --   This must equal:
+  --     (mma_sync A B C).data (isa_row slot) (isa_col slot) .bits
+  --     where isa_row, isa_col come from the PTX ISA §9.7.13 table.
+  --   The K-dimension mismatch: mma_sync (WMMA.lean:102) sums over Fin 16 but ptx
+  --   sums over 8 steps per register.  Resolution: the m16n8k8 variant has K=8; if
+  --   the fragments are defined as K=8 (not K=16 as in FragA/FragB), the K-sums align.
+  --   With the current 16×16×16 fragment definitions, a reindexing argument is needed.
+  --   STATUS: blocked by ptx_mma_m16n8k8 being sorry'd and ISA table not formalised.
+  --
+  -- OVERALL BLOCKERS (in priority order):
+  --   1. Implement wmma_to_ptx_A/B to encode all rows (not just row 0).
+  --   2. Implement wmma_to_ptx_C / ptx_to_wmma_C to cover the full 16×16 fragment.
+  --   3. Close ptx_mma_m16n8k8 (see definition sketch above).
+  --   4. Formalise the PTX ISA §9.7.13.4 lane/register mapping as a Lean Fin function.
+  --
+  -- MATHLIB LEMMAS NEEDED (once structural stubs are fixed):
+  --   • UInt32 bit-manipulation: (a ||| b >>> 16) &&& 0xFFFF = b  (needs scratch proof)
+  --   • Finset.sum_congr  (rewrite summands after unpack round-trip)
+  --   • Fin.ext_iff  (Fin i = Fin j ↔ i.val = j.val)
+  --
+  -- DEPENDENCIES:
+  --   • ptx_mma_m16n8k8 (this file, above) — sorry'd
+  --   • wmma_to_ptx_A/B/C (WMMA.lean:173–206) — row-0 stubs must be fixed
+  --   • mma_sync (WMMA.lean:98) — definitionally correct; no sorry
+  -- ──────────────────────────────────────────────────────────────────────────
   sorry
-  -- Required lemmas:
-  --   • wmma_to_ptx_A_round_trip : ptx_unpack_A (wmma_to_ptx_A frag) = frag.data
-  --   • wmma_to_ptx_C_round_trip : ptx_to_wmma_C (wmma_to_ptx_C frag) = frag
-  --   • ptx_mma_spec : ptx_mma_m16n8k8 matches mma_sync per PTX ISA table
-  --   • Fragment.ext : equal .data → equal Fragment
 
 /-- **PTX GEMM correctness**: `ptx_gemm_impl` computes the mathematical spec.
 

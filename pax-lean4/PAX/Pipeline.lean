@@ -175,12 +175,59 @@ noncomputable def pipeline_gemm_impl {M N K : ℕ} (stages : ℕ)
 theorem pipeline_gemm_correct {M N K : ℕ} (stages : ℕ) (h : stages ≥ 2) (h' : stages ≤ 4) :
     ∀ A B, pipeline_gemm_impl stages A B = gemm_spec A B := by
   intro A B
-  -- pipeline_gemm_impl stages A B = wmma_gemm_impl A B  (by definition)
-  -- wmma_gemm_impl A B = gemm_spec A B                  (by wmma_correct)
-  -- Proof is independent of stages: the pipeline is a scheduling transformation
-  -- that reorders but does not change the set of mma_sync calls or their inputs.
-  -- The copy-compute dependency (copyBeforeCompute) ensures smem is valid at each
-  -- compute step; copyOverlapsCompute captures the overlap structure.
+  -- ── PROOF SKETCH (pipeline_gemm_correct) ─────────────────────────────────
+  -- Goal: pipeline_gemm_impl stages A B = gemm_spec A B
+  --
+  -- CURRENT PROOF CHAIN (trivial definitional reduction):
+  --   pipeline_gemm_impl (line 172) is defined as `wmma_gemm_impl A B`, so
+  --   `unfold pipeline_gemm_impl` reduces the goal to wmma_gemm_impl A B = gemm_spec A B,
+  --   closed by `exact wmma_correct A B`.
+  --   The outstanding sorry therefore lives in wmma_correct (WMMA.lean:234).
+  --   This theorem itself is fully proved once wmma_correct is closed.
+  --   The proof is deliberately independent of `stages` — the pipeline's scheduling
+  --   parameters affect throughput (see pipeline_overlap_bound) but NOT the output.
+  --
+  -- SCHEDULING-INDEPENDENCE ARGUMENT (for when pipeline_gemm_impl becomes concrete):
+  --   If pipeline_gemm_impl is replaced by the actual double/triple-buffered tiling loop,
+  --   the following four properties must be established:
+  --
+  --   (1) COPY-COMPUTE ORDERING (no data race):
+  --       ∀ stage k, CopyEnd stage k happens-before ComputeStart stage k.
+  --       (copyBeforeCompute invariant, line 76.)
+  --       Ensures each mma_sync reads valid data from shared memory, not a partially-
+  --       written buffer.  Proof: induction on the pipeline event sequence.
+  --
+  --   (2) SAME TILE INPUTS:
+  --       The A_frag and B_frag constructed from shared memory for each tile (m_t, n_t, k_t)
+  --       are identical to those in wmma_gemm_impl (same logical addresses, same layout).
+  --       Proof: load_matrix_sync correctness (the abstract stub in WMMA.lean:64 delivers
+  --       the same element at each (i, j) regardless of the cp.async prefetch order).
+  --
+  --   (3) TILE REORDERING IS SAFE FOR EXACT ACCUMULATION:
+  --       Floating-point addition is not generally associative, but here all FP16
+  --       products are exactly represented in Float32 (exactness from
+  --       gemm_spec_rational_exact, Matrix.lean:148).  Therefore every intermediate
+  --       partial sum is also exact, and the final sum equals the mathematical sum
+  --       regardless of the order in which k-tiles are processed by the pipeline.
+  --       Proof: induction using Float32.add_exact (once Float32.add is implemented),
+  --       together with Finset.sum_comm to swap pipeline-stage and k-tile indices.
+  --
+  --   (4) ACCUMULATOR SCOPE:
+  --       The accumulator fragC is initialised to fill_fragment Float32.zero per
+  --       output tile and all K k-tiles are accumulated into it before the store.
+  --       The double/triple-buffer prologue and epilogue contribute zero net output.
+  --       Proof: same foldl-induction as wmma_correct (Steps 5–7 of that sketch).
+  --
+  -- MATHLIB LEMMAS NEEDED (for concrete pipeline proof):
+  --   • Finset.sum_comm  (reorder pipeline-stage × k-tile summation)
+  --   • List.foldl_append  (split foldl at prologue/main/epilogue boundaries)
+  --   • AddCommMonoid.add_comm  (rearrange Float32 partial sums, needs stub fixed)
+  --
+  -- DEPENDENCIES:
+  --   • wmma_correct (WMMA.lean:234) — sorry'd; this theorem directly reduces to it
+  --   • gemm_spec_rational_exact (Matrix.lean:148) — needed for reorder-safety in (3)
+  --   • Float32.add (Float32.lean:49) — zero stub
+  -- ─────────────────────────────────────────────────────────────────────────────
   unfold pipeline_gemm_impl
   exact wmma_correct A B
 

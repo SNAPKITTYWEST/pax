@@ -175,11 +175,67 @@ lemma round_positive_normal_error (x : ℚ)
     ∃ (rv : ℚ),
       (roundToFP16 x).toRat = some rv ∧
       |rv - x| ≤ spacing (roundToFP16 x) / 2 := by
+  -- ── PROOF SKETCH (round_positive_normal_error) ──────────────────────────
+  -- Hypotheses: 0 < x,  2^(−14) ≤ x ≤ 65504.
+  -- Goal: ∃ rv, (roundToFP16 x).toRat = some rv ∧ |rv − x| ≤ spacing(roundToFP16 x) / 2.
+  --
+  -- STEP 1 — roundToFP16 x takes the normal branch and is a finite normal Float16.
+  --   Because ¬(x < −65504), ¬(x > 65504), x ≠ 0, and x ≥ 2^(−14),
+  --   roundToFP16 (line 111) skips the overflow, negative, zero, and subnormal guards.
+  --   The normal branch fires, producing a Float16 with expBits ∈ [1, 30].
+  --   Lean proof: simp [roundToFP16]; split on each guard using hpos, hnorm, hbnd;
+  --   omega/linarith to discharge them.
+  --
+  -- STEP 2 — Identify k = ⌊log₂ x⌋.
+  --   k₀ := Nat.log 2 x.num.natAbs − Nat.log 2 x.den  (computed in line 131–132).
+  --   k₀c := if 2^k₀ ≤ x then k₀ else k₀ − 1  (one-step off-by-one correction).
+  --   k  := max (−14) (min 15 k₀c)  (clamp to FP16 normal exponent range).
+  --   Property needed: 2^k ≤ x < 2^(k+1)  (defining property of ⌊log₂⌋ on [2^k, 2^(k+1))).
+  --   Lean proof:
+  --     • Nat.log_le_self and Nat.lt_pow_succ_log_self for the integer case.
+  --     • Transfer to ℚ via Rat.ofInt_le and Rat.cast_pow.
+  --     • The k₀c correction: case split on the conditional (line 132).
+  --
+  -- STEP 3 — The normal FP16 grid in [2^k, 2^(k+1)) has 1024 points with spacing 2^(k−10).
+  --   Grid: { 2^k × (1 + m/1024) | m : Fin 1024 }.
+  --   roundToFP16 computes mscaled := (x / 2^k − 1) × 2^10 ∈ [0, 1024)  (from Step 2).
+  --   ip := ⌊mscaled⌋ ∈ {0, …, 1023};  frac := mscaled − ip ∈ [0, 1).
+  --   m := rne_round ip frac;  rv := 2^k × (1 + m / 1024).
+  --   Lean: Int.floor_nonneg (mscaled ≥ 0), Int.floor_lt (mscaled < 1024 from Step 2).
+  --
+  -- STEP 4 — RNE error: |rne_round ip frac − mscaled| ≤ 1/2.
+  --   Case 1: frac < 1/2 → rne_round ip frac = ip   (rne_round_down, line 80).
+  --           |ip − mscaled| = |ip − ip − frac| = frac < 1/2.  ✓
+  --   Case 2: frac > 1/2 → rne_round ip frac = ip + 1  (rne_round_up, line 84).
+  --           |ip+1 − mscaled| = 1 − frac < 1/2.  ✓
+  --   Case 3: frac = 1/2 → rne_round picks even ip or ip+1; error = exactly 1/2. ✓
+  --   Lean: case split on (frac < 1/2), (frac > 1/2), (frac = 1/2); apply rne_round_down/up.
+  --
+  -- STEP 5 — Lift integer error to FP16 value error.
+  --   |rv − x| = |2^k × (1 + m/1024) − x|
+  --            = |2^k × ((m − mscaled) / 1024)|    (since x = 2^k × (1 + mscaled/1024))
+  --            = 2^k × |m − mscaled| / 1024
+  --            ≤ 2^k × (1/2) / 1024  (from Step 4)
+  --            = 2^(k−10) / 2
+  --            = spacing (roundToFP16 x) / 2.       ✓  (spacing = 2^(k−10) for normal)
+  --   Lean: ring_nf, then norm_num or positivity for the exponent arithmetic.
+  --
+  -- STEP 6 — Verify spacing (roundToFP16 x) = 2^(k−10).
+  --   The encoded Float16 has expBits = (k + 15).toNat, so
+  --   spacing = 2^((expBits.val − 15) − 10) = 2^(k−10).
+  --   Lean: simp [spacing, Float16.isNormal, Float16.expBits]; omega / norm_num.
+  --
+  -- MATHLIB LEMMAS NEEDED:
+  --   • Nat.log_le_self, Nat.lt_pow_succ_log_self  (log floor characterisation)
+  --   • Int.floor_le, Int.lt_floor_add_one  (floor on ℚ → ℤ)
+  --   • abs_le  (split absolute-value inequality into two linear inequalities)
+  --   • rne_round_down / rne_round_up  (this file, lines 80, 84)
+  --   • zpow_sub, Rat.cast_zpow  (rational exponent arithmetic)
+  --
+  -- DEPENDENCIES: roundToFP16 (line 111), rne_round (line 74), spacing (line 37).
+  --   All definitions are complete (no sorry in their bodies).
+  -- ─────────────────────────────────────────────────────────────────────────
   sorry
-  -- Step 1: x > 0, x ≤ 65504, x ≥ 2^(-14) → roundToFP16 x is finite normal.
-  -- Step 2: Let k = ⌊log₂ x⌋, k ∈ [-14, 15].
-  --         Grid spacing = 2^(k-10); roundToFP16 picks the nearest grid point.
-  -- Step 3: |rv - x| ≤ (grid spacing)/2 = 2^(k-10)/2 = spacing(round(x))/2.
 
 /-- Rounding error for a positive subnormal input is bounded by half the spacing.
 
@@ -193,10 +249,69 @@ lemma round_positive_subnormal_error (x : ℚ)
     ∃ (rv : ℚ),
       (roundToFP16 x).toRat = some rv ∧
       |rv - x| ≤ spacing (roundToFP16 x) / 2 := by
+  -- ── PROOF SKETCH (round_positive_subnormal_error) ─────────────────────────
+  -- Hypotheses: 0 < x,  x < 2^(−14).
+  -- Goal: ∃ rv, (roundToFP16 x).toRat = some rv ∧ |rv − x| ≤ spacing(roundToFP16 x) / 2.
+  -- (Simpler than the normal case because the subnormal grid is uniform.)
+  --
+  -- STEP 1 — roundToFP16 x takes the subnormal branch.
+  --   Because ¬(x < −65504), ¬(x > 65504), x ≠ 0 (from 0 < x), and x < 2^(−14),
+  --   roundToFP16 (line 119) fires the subnormal block: ax = x, scaled = x × 2^24.
+  --   From 0 < x < 2^(−14): scaled ∈ (0, 1024).
+  --   Result: expBits = 0, mantBits = rne_round ⌊scaled⌋ frac.
+  --   Corner case: if scaled < 1 (i.e., x < 2^(−24)) then ⌊scaled⌋ = 0 and
+  --     rne_round 0 frac may return 0 → isZero (not isSubnormal).  Handle separately:
+  --     rv = 0, |rv − x| = x < 2^(−24) / 2 = spacing/2.  ✓
+  --   Lean: simp [roundToFP16]; apply not_lt.mpr at hsubnorm; split on x < 2^(−24).
+  --
+  -- STEP 2 — Subnormal grid is uniform with spacing 2^(−24).
+  --   Subnormal FP16 values = { m × 2^(−24) | m : Fin 1024 }.
+  --   spacing (roundToFP16 x) = 2^(−24)  regardless of which grid point is chosen:
+  --   simp [spacing, Float16.isSubnormal, Float16.isZero] → 2^(−(24:ℤ)).
+  --   (The isZero corner case has the same spacing because isZero branch also returns
+  --   2^(−24) in the spacing definition, line 38.)
+  --
+  -- STEP 3 — rne_round selects the nearest integer in [0, 1023].
+  --   ip := ⌊scaled⌋ ∈ {0, …, 1023}  (from scaled < 1024 and Int.floor_nonneg).
+  --   frac := scaled − ip ∈ [0, 1).
+  --   m := rne_round ip frac ∈ {ip, ip+1}.
+  --   Error bound: |m − scaled| ≤ 1/2.
+  --     Case frac < 1/2: m = ip, |m − scaled| = frac < 1/2.  (rne_round_down)
+  --     Case frac > 1/2: m = ip+1, |m − scaled| = 1 − frac < 1/2.  (rne_round_up)
+  --     Case frac = 1/2: |m − scaled| = 1/2.  (exact tie, still ≤ 1/2.)
+  --   Lean: case split, apply rne_round_down / rne_round_up, linarith.
+  --
+  -- STEP 4 — Lift to Float16 value error.
+  --   rv := (m : ℚ) × 2^(−24)   (Float16.toRat subnormal branch: mantBits.val / 2^24).
+  --   x  = scaled × 2^(−24)     (since scaled = x × 2^24).
+  --   |rv − x| = |m − scaled| × 2^(−24) ≤ (1/2) × 2^(−24) = 2^(−25) = spacing/2.  ✓
+  --   Lean: ring_nf; then apply the bound from Step 3; norm_num for 2^(−25).
+  --
+  -- STEP 5 — Witness: rv = (m : ℚ) × 2^(−24).
+  --   Need to show (roundToFP16 x).toRat = some rv.
+  --   The encoding: bits = (s <<< 15) ||| m.toNat.toUInt16 (s = 0 since x > 0).
+  --   Float16.mantBits of this encoding = m.toNat  (since m ∈ [0, 1023] and 0x3FF mask).
+  --   Float16.expBits = 0, Float16.isSubnormal = true (when m > 0).
+  --   Float16.toRat subnormal branch = (1 : ℚ) × (m : ℚ) / 2^24 = m × 2^(−24).  ✓
+  --   Lean: simp [Float16.toRat, Float16.isSubnormal, Float16.mantBits]; omega or norm_num.
+  --   Caveats:
+  --     • m.toNat.toUInt16 is safe because m ∈ [0, 1023] < 65536 = 2^16.
+  --     • The UInt16 round-trip: (m.toNat.toUInt16).toNat = m.toNat needs
+  --       UInt16.toNat_ofNat_of_lt (needs m.toNat < 65536, provable by omega from m ≤ 1023).
+  --
+  -- MATHLIB LEMMAS NEEDED:
+  --   • Int.floor_nonneg (scaled ≥ 0 → ⌊scaled⌋ ≥ 0)
+  --   • Int.floor_lt (scaled < 1024 → ⌊scaled⌋ < 1024)
+  --   • abs_le / abs_sub_le  (for the ≤ 1/2 bound)
+  --   • mul_le_mul_of_nonneg_right  (scale |m − scaled| by 2^(−24))
+  --   • rne_round_down / rne_round_up  (this file, lines 80, 84)
+  --   • UInt16.toNat_ofNat_of_lt  (bit round-trip for mantissa extraction)
+  --
+  -- DEPENDENCIES: roundToFP16 (line 111), rne_round (line 74), spacing (line 37).
+  --   All definitions are complete; this theorem is the easier rounding case because
+  --   no exponent computation is needed (uniform grid, constant denominator 2^24).
+  -- ─────────────────────────────────────────────────────────────────────────
   sorry
-  -- Step 1: x ∈ (0, 2^(-14)) → roundToFP16 x is finite subnormal.
-  -- Step 2: Subnormal grid: {k × 2^(-24) | k ∈ [0, 1023]}, spacing = 2^(-24).
-  -- Step 3: RNE picks nearest; max error = 2^(-24)/2 = 2^(-25).
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- MAIN RNE ERROR BOUND THEOREM

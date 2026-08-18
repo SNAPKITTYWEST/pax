@@ -62,6 +62,56 @@ theorem Float32.exact_fp16_product_sum
     (hfin : ∀ p ∈ pairs, p.1.isFinite && p.2.isFinite) :
     ∃ (z : Float32), z.toRat = some (pairs.foldl
       (fun acc ⟨a, b⟩ => acc + (a.toRat.getD 0) * (b.toRat.getD 0)) 0) := by
+  -- ── PROOF SKETCH (Float32.exact_fp16_product_sum) ────────────────────────
+  -- Goal: ∃ z : Float32, z.toRat = some S, where
+  --   S = foldl (fun acc (a,b) => acc + a.toRat.getD 0 * b.toRat.getD 0) 0 pairs.
+  --
+  -- NOTE: Float32.zero is the WRONG witness for any non-empty list with nonzero
+  -- products.  The correct witness must be the Float32 encoding S bit-exactly.
+  --
+  -- STEP 1 — Individual products are exact in Float32 (22 sig-bits < 24 FP32 capacity).
+  --   Each finite FP16 significand has ≤ 11 bits (10 mantissa + 1 hidden).
+  --   Product of two 11-bit significands: (2^11 − 1)^2 = 2^22 − 2^12 + 1 < 2^22,
+  --   so the product significand fits in 22 bits.  FP32 has 24-bit significand,
+  --   so 22 < 24 → Float32.mul (toFloat32 a) (toFloat32 b) incurs zero rounding.
+  --   Sub-lemma needed (not yet stated in this file):
+  --     Float32.mul_fp16_exact : ∀ a b : Float16,
+  --       a.isFinite → b.isFinite →
+  --       (Float32.mul (toFloat32 a) (toFloat32 b)).toRat
+  --         = some (a.toRat.getD 0 * b.toRat.getD 0)
+  --   BLOCKED BY: Float32.mul (line 50) is a zero-returning stub.
+  --
+  -- STEP 2 — Accumulation exactness requires an additional hypothesis.
+  --   Induct on pairs with invariant: the running Float32 accumulator has toRat = some S_k.
+  --   Base: acc = Float32.zero, S_0 = 0.  ✓
+  --   Inductive step: Float32.add S_k p_{k+1} is exact iff S_{k+1} fits in 24 sig-bits.
+  --   MISSING HYPOTHESIS: the theorem as stated allows mixed-sign products with large
+  --   exponent spread; the running sum may then require > 23 mantissa bits at some step.
+  --   Sufficient additional condition:
+  --     hpos : ∀ p ∈ pairs, 0 ≤ p.1.toRat.getD 0 * p.2.toRat.getD 0
+  --   Under non-negativity + the 20-fractional-mantissa-bit bound per product,
+  --   the denominator of S_k divides 2^20 ⊆ 2^23, so each addition step is exact.
+  --   For the typical GEMM use-case inputs ∈ [−1, 1] a separate case analysis handles
+  --   negative products but requires tracking the significand of the running sum.
+  --
+  -- STEP 3 — Construct the correct witness by the foldl itself.
+  --   z := List.foldl (fun acc ⟨a, b⟩ =>
+  --            Float32.add acc (Float32.mul (Float16.toFloat32 a) (Float16.toFloat32 b)))
+  --          Float32.zero pairs
+  --   By Steps 1 and 2 (inducting on pairs), z.toRat = some S. ✓
+  --   Requires Float32.add and Float32.mul to be genuinely implemented (not stubs).
+  --
+  -- MATHLIB LEMMAS NEEDED:
+  --   • List.foldl_induction  (induction with invariant over foldl)
+  --   • Nat.bitLen_mul_le  (bit-width bound: bitLen (a*b) ≤ bitLen a + bitLen b)
+  --   • Rat.add_denom_dvd_lcm  (denominator of a sum divides lcm of denominators)
+  --   • Finset.sum_le_card_nsmul  (for magnitude bound in Step 2)
+  --
+  -- DEPENDENCIES (all must close before this theorem):
+  --   • Float16.toFloat32_exact (Float16.lean:208) — sub-cases sorry'd
+  --   • Float32.mul (this file, line 50) — zero stub; must be implemented
+  --   • Float32.add (this file, line 49) — zero stub; must be implemented
+  -- ──────────────────────────────────────────────────────────────────────────
   exact ⟨Float32.zero, by sorry⟩
 
 instance : Zero Float32 := ⟨Float32.zero⟩

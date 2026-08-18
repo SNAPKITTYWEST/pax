@@ -234,11 +234,67 @@ def ptx_to_wmma_C (regs : Fin 8 → UInt32) : FragC :=
 theorem wmma_correct {M N K : ℕ}
     (A : Matrix Float16 M K) (B : Matrix Float16 K N) :
     wmma_gemm_impl A B = gemm_spec A B := by
+  -- ── PROOF SKETCH (wmma_correct) ─────────────────────────────────────────
+  -- Goal: wmma_gemm_impl A B = gemm_spec A B    (funext; fix i j throughout)
+  --
+  -- STEP 1 — Unfold wmma_gemm_impl for a fixed (i, j).
+  --   Let m_tile = i.val / 16, n_tile = j.val / 16,
+  --       i_in := ⟨i.val % 16, _⟩, j_in := ⟨j.val % 16, _⟩.
+  --   wmma_gemm_impl A B i j
+  --     = ((List.range (K/16)).foldl (mma_sync_step) (fill_fragment Float32.zero))
+  --         .data i_in j_in
+  --
+  -- STEP 2 — fill_fragment_zero: (fill_fragment Float32.zero).data _ _ = Float32.zero.
+  --   Proof: simp [fill_fragment] — rfl by definition.  No sorry needed here.
+  --
+  -- STEP 3 — mma_sync unfolds definitionally per step.
+  --   (mma_sync A_frag B_frag acc).data i_in j_in
+  --     = Float32.add (acc.data i_in j_in)
+  --         (Σ_{kk : Fin 16} Float32.mul (toFloat32 (A_frag.data i_in kk))
+  --                                       (toFloat32 (B_frag.data kk j_in)))
+  --   Proof: rfl (mma_sync is defined exactly this way, WMMA.lean:99–103).
+  --
+  -- STEP 4 — Tile k_t contributes the K-slice [k_t*16, (k_t+1)*16).
+  --   A_frag.data ii kk = A ⟨m_tile*16 + ii.val, _⟩ ⟨k_t*16 + kk.val, _⟩  (in-bounds)
+  --   B_frag.data kk jj = B ⟨k_t*16 + kk.val, _⟩ ⟨n_tile*16 + jj.val, _⟩  (in-bounds)
+  --   The boundary guards (if h1 : row < M, if h2 : col < K) need omega to discharge.
+  --   MISSING HYPOTHESIS: requires i.val < M (from Fin bound) and k_t < K/16;
+  --   the outer tile guard uses i.val = m_tile*16 + i_in.val, so
+  --   m_tile*16 + ii.val < M needs hdivM : 16 ∣ M (else boundary guard fires default).
+  --
+  -- STEP 5 — Foldl over K/16 tiles telescopes to the full K-sum.
+  --   Induction on kt from 0 to K/16 − 1 with invariant:
+  --     after kt steps, acc.data i_in j_in
+  --       = Σ_{k : Fin (kt * 16)} Float32.mul (toFloat32 (A i ⟨k,_⟩)) (toFloat32 (B ⟨k,_⟩ j))
+  --   Base: kt = 0, acc = fill_fragment Float32.zero, sum = 0.  ✓ (Step 2)
+  --   Step: apply mma_sync spec (Step 3) + Finset.sum_range_succ to extend the sum.
+  --   Key Mathlib lemma: Finset.sum_range_add or Finset.sum_bUnion with disjoint tiles.
+  --   BLOCKED BY: Float32.add associativity (AddCommMonoid.add_zero/zero_add sorry'd).
+  --
+  -- STEP 6 — Tile partition: [0, K) = ⋃_{kt < K/16} [kt*16, (kt+1)*16).
+  --   Requires: K % 16 = 0  (i.e., 16 ∣ K).
+  --   MISSING HYPOTHESIS: the theorem statement has no divisibility constraint on K.
+  --   Without 16 ∣ K, List.range (K/16) misses the last K mod 16 columns.
+  --   Add: hdivK : 16 ∣ K  (and similarly hdivM, hdivN for M and N).
+  --
+  -- STEP 7 — Compare the telescoped sum with gemm_spec.
+  --   gemm_spec A B i j = Σ_{k : Fin K} Float32.mul (toFloat32 (A i k)) (toFloat32 (B k j))
+  --   After Steps 5–6, the foldl equals this sum.
+  --   Final step: Finset.sum_congr rfl + simp [Fin.ext_iff] to align tile/flat indexing.
+  --
+  -- MATHLIB LEMMAS NEEDED:
+  --   • List.foldl_induction  (induction with invariant over foldl)
+  --   • Finset.sum_range_succ  (extend sum by one element)
+  --   • Finset.sum_bUnion  (sum over disjoint tiles = sum of tile sums)
+  --   • Nat.div_mul_cancel (for 16 ∣ K tile-covers-all)
+  --   • Fin.val_eq_val + omega  (reindex tile → flat Fin)
+  --
+  -- DEPENDENCIES:
+  --   • gemm_spec_rational_exact (Matrix.lean:148) — sorry'd; needed for exactness of add
+  --   • Float32.add (Float32.lean:49) — zero stub; AddCommMonoid sorry'd
+  --   • Float32.exact_fp16_product_sum (Float32.lean:59) — sorry'd
+  --   MISSING HYPOTHESES: 16 ∣ M, 16 ∣ N, 16 ∣ K  (not in current theorem statement)
+  -- ──────────────────────────────────────────────────────────────────────────
   sorry
-  -- Key lemmas needed:
-  --   • mma_sync_spec : mma_sync A B C = accum + gemm_spec A.data B.data
-  --   • tile_partition : Finset.univ = ⋃ tiles (Finset.sum over tiles = total sum)
-  --   • fill_fragment_zero : (fill_fragment Float32.zero).data i j = Float32.zero
-  --   • Finset.sum_biUnion (disjoint tiles) → sum over union = sum of sums
 
 end PAX
